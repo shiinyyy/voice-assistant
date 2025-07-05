@@ -44,3 +44,10 @@ todo.md
 /build
 /.next
 /dist
+
+# Debug logs and temporary files
+*.log
+*.debug
+headers.txt
+pglite-debug.log
+firebase-debug.log

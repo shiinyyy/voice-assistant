@@ -12,7 +12,7 @@ Lucida is an intelligent voice assistant that performs security-critical operati
 - **Authentication**: Pass code verification with employee database lookup
 - **Fraud Detection**: Real-time monitoring and alerting for unauthorised access attempts  
 - **Database Access Control**: Role-based authorisation with audit trail logging
-- **Email Alert*: Automated notifications for security violations
+- **Email Alert**: Automated notifications for security violations
 
 ### Workflow Integration
 The assistant fits into enterprise security workflows as:
@@ -23,21 +23,22 @@ The assistant fits into enterprise security workflows as:
 
 ## Technical Architecture
 
-### AI Models and Tools
+### Models and Tools
 
 **Primary Models:**
 - **gpt-4.1**: Handles complex reasoning, context analysis, and decision-making
 - **gpt-4o-realtime**: Processes real-time audio and text input/output streams
+- **gpt-40**: Guardrail handling
 
 **Integration Framework:**
 - **OpenAI Realtime SDK**: Real-time bidirectional communication
 - **OpenAI Agents SDK**: Multi-agent coordination and tool execution
-- **Firebase Functions**: Serverless backend infrastructure
+- **Firebase Hosting**: Static asset delivery
 - **Next.js**: Frontend framework with API routing
 
 **Backend Services:**
 - **Node.js/TypeScript**: Server-side logic and API endpoints
-- **Firebase Hosting**: Static asset delivery and routing
+- **Firebase Functions**: Serverless backend infrastructure
 - **Express.js**: RESTful API handling
 
 ## Hosting Infrastructure
