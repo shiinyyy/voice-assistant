@@ -1,0 +1,21 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "lib",
+    "sourceMap": true,
+    "noEmit": false,
+    "module": "commonjs",
+    "target": "es2017",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true
+  },
+  "include": [
+    "src/index.ts",
+    "src/server.ts",
+    "dist/types/**/*.ts"
+  ],
+  "exclude": [
+    "src/app/**/*",
+    "node_modules"
+  ]
+}
