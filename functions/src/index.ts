@@ -7,8 +7,8 @@ import ExcelJS from 'exceljs';
 import path from 'path';
 import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
-// Import data from the source directory
-import { employeeAccountInfo, dataBase, checkEmployeeAuthorisation } from '../../src/app/agentConfigs/chatSupervisor/sampleData';
+// Import data from local file
+import { employeeAccountInfo, dataBase, checkEmployeeAuthorisation } from './sampleData';
 
 const app = express();
 const api = express.Router();
@@ -123,6 +123,29 @@ ${employee.lastActivities.notes}`;
     case "checkEmployeeAuthorisation": {
       const result = checkEmployeeAuthorisation(args.employeeID);
       console.log(`[executeToolCall] checkEmployeeAuthorisation result:`, result);
+      
+      // If unauthorized, send security notification email
+      if (!result.Authorised) {
+        console.log(`[executeToolCall] Unauthorised access attempt, sending security notification`);
+        
+        // Directly execute email sending logic
+        console.log(`[executeToolCall] Sending email to: productManager@gmail.com`);
+        console.log(`[executeToolCall] Subject: Unauthorised Database Access Attempt`);
+        console.log(`[executeToolCall] Body: An unauthorised attempt was made to access the database by Employee ID: ${args.employeeID}`);
+        
+        // Return result with notification info
+        return {
+          ...result,
+          emailSent: true,
+          emailDetails: {
+            recipient: "productManager@gmail.com",
+            subject: "Unauthorised Database Access Attempt",
+            body: `An unauthorised attempt was made to access the database by Employee ID: ${args.employeeID}. Please open investigation inside log history.`
+          },
+          securityNotification: "Security team has been notified of this unauthorized access attempt."
+        };
+      }
+      
       return result;
     }
     
@@ -308,7 +331,23 @@ api.post("/responses", async (req: Request, res: Response) => {
 
     console.log(`[/api/responses] Converted messages:`, JSON.stringify(messages, null, 2));
     
-    // Convert tools format if needed
+    // Add system message if not present
+    if (!messages.some(msg => msg.role === 'system')) {
+      messages.unshift({
+        role: 'system',
+        content: `You are a security system assistant. Follow these rules strictly:
+1. When a user provides a pass code:
+   - First use getEmployeeAccountInfo to get their account details
+   - Only proceed with authorization checks if they specifically request database access
+2. For database access requests:
+   - First confirm you have their employee ID (get it from getEmployeeAccountInfo if needed)
+   - Then use checkEmployeeAuthorisation to verify access
+3. Always be helpful and explain what information you need from the user
+4. Never assume authorization status without checking`
+      });
+    }
+    
+    // Convert tools format if needed and provide default tools
     let formattedTools = tools;
     if (tools && Array.isArray(tools)) {
       formattedTools = tools.map((tool: any) => {
@@ -326,12 +365,87 @@ api.post("/responses", async (req: Request, res: Response) => {
           }
         };
       });
+    } else {
+      // Provide default tools when none are specified
+      formattedTools = [
+        {
+          type: "function",
+          function: {
+            name: "getEmployeeAccountInfo",
+            description: "Get employee account information using their pass code. MUST be called when user provides a 4-digit pass code.",
+            parameters: {
+              type: "object",
+              properties: {
+                pass_code: {
+                  type: "string",
+                  description: "Employee pass code (4 digits, may include hyphens)"
+                }
+              },
+              required: ["pass_code"]
+            }
+          }
+        },
+        {
+          type: "function",
+          function: {
+            name: "checkEmployeeAuthorisation",
+            description: "Check if an employee has authorization to access the database. When unauthorized, automatically sends security notification.",
+            parameters: {
+              type: "object",
+              properties: {
+                employeeID: {
+                  type: "string",
+                  description: "Employee ID (4 digits)"
+                }
+              },
+              required: ["employeeID"]
+            }
+          }
+        }
+      ];
     }
+
+    // Check if we should force tool calling
+    const inputText = JSON.stringify(messages).toLowerCase();
+    
+    // First check if it's explicitly about authorization or database access
+    const isAuthCheck = inputText.includes('authorization') || inputText.includes('authorisation') || 
+                       inputText.includes('database access') || inputText.includes('database');
+    
+    // Then check for pass codes and employee IDs
+    const hasExplicitPassCode = inputText.includes('pass code') || inputText.includes('passcode');
+    const hasExplicitEmployeeId = inputText.includes('employee id') || inputText.includes('employeeid');
+    
+    // Look for 4-digit numbers
+    const fourDigitMatches = inputText.match(/\b\d{4}\b/g) || [];
+    
+    // Determine which tool to force based on context
+    let toolChoice = null;
+    if (isAuthCheck || hasExplicitEmployeeId) {
+      // If it's about authorization or explicitly mentions employee ID, use checkEmployeeAuthorisation
+      toolChoice = {
+        type: "function",
+        function: { name: "checkEmployeeAuthorisation" }
+      };
+    } else {
+      // In all other cases (including when there's no context), use getEmployeeAccountInfo
+      toolChoice = {
+        type: "function",
+        function: { name: "getEmployeeAccountInfo" }
+      };
+    }
+    
+    const shouldForceTools = isAuthCheck || hasExplicitPassCode || hasExplicitEmployeeId || fourDigitMatches.length > 0;
+    
+    console.log(`[/api/responses] Force tools: ${shouldForceTools}, isAuthCheck: ${isAuthCheck}, hasExplicitPassCode: ${hasExplicitPassCode}, hasExplicitEmployeeId: ${hasExplicitEmployeeId}, fourDigitMatches: ${fourDigitMatches.join(',')}`);
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1",
       messages: messages,
       ...(formattedTools && { tools: formattedTools }),
+      ...(shouldForceTools && { 
+        tool_choice: toolChoice || "required"
+      }),
       ...(parallel_tool_calls !== undefined && { parallel_tool_calls }),
     });
 
