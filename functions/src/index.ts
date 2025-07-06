@@ -3,8 +3,6 @@ import express, { Request, Response } from "express";
 import cors from "cors";
 import OpenAI from "openai";
 import axios from 'axios';
-import ExcelJS from 'exceljs';
-import path from 'path';
 import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
 // Import data from local file
@@ -130,10 +128,14 @@ ${employee.lastActivities.notes}`;
       if (!result.Authorised) {
         console.log(`[executeToolCall] Unauthorised access attempt, sending security notification`);
         
-        // Directly execute email sending logic
-        console.log(`[executeToolCall] Sending email to: productManager@gmail.com`);
-        console.log(`[executeToolCall] Subject: Unauthorised Database Access Attempt`);
-        console.log(`[executeToolCall] Body: An unauthorised attempt was made to access the database by Employee ID: ${args.employeeID}`);
+        // Actually execute the sendEmail tool call
+        const emailResult = await executeToolCall("sendEmail", {
+          recipient: "productManager@gmail.com",
+          subject: "Unauthorised Database Access Attempt",
+          body: `An unauthorised attempt was made to access the database by Employee ID: ${args.employeeID}. Please open investigation inside log history.`
+        });
+        
+        console.log(`[executeToolCall] Email notification result:`, emailResult);
         
         // Return result with notification info
         return {
@@ -419,8 +421,7 @@ WORKFLOW:
       ];
     }
 
-    // Simplified logic: Let OpenAI decide which tool to use based on context
-    // The system message already provides clear instructions about when to use each tool
+    // Let Agent decides which tool to use based on context
     const userMessages = messages.filter(msg => msg.role === 'user');
     const userInputText = JSON.stringify(userMessages).toLowerCase();
     
