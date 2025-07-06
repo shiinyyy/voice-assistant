@@ -121,6 +121,8 @@ ${employee.lastActivities.notes}`;
     }
     
     case "checkEmployeeAuthorisation": {
+      console.log(`[executeToolCall] checkEmployeeAuthorisation called with args:`, args);
+      console.log(`[executeToolCall] args.employeeID value: "${args.employeeID}"`);
       const result = checkEmployeeAuthorisation(args.employeeID);
       console.log(`[executeToolCall] checkEmployeeAuthorisation result:`, result);
       
@@ -336,14 +338,26 @@ api.post("/responses", async (req: Request, res: Response) => {
       messages.unshift({
         role: 'system',
         content: `You are a security system assistant. Follow these rules strictly:
-1. When a user provides a pass code:
-   - First use getEmployeeAccountInfo to get their account details
-   - Only proceed with authorization checks if they specifically request database access
-2. For database access requests:
-   - First confirm you have their employee ID (get it from getEmployeeAccountInfo if needed)
-   - Then use checkEmployeeAuthorisation to verify access
-3. Always be helpful and explain what information you need from the user
-4. Never assume authorization status without checking`
+
+TOOL SELECTION RULES:
+1. If the context contains "employee ID: XXXX" → ALWAYS use checkEmployeeAuthorisation(employeeID="XXXX")
+2. If the context contains "pass code: XXXX" → ALWAYS use getEmployeeAccountInfo(pass_code="XXXX")
+
+EXAMPLES:
+- Context: "employee ID: 1506" → Call checkEmployeeAuthorisation(employeeID="1506")
+- Context: "pass code: 0110" → Call getEmployeeAccountInfo(pass_code="0110")
+
+CRITICAL RULES:
+- getEmployeeAccountInfo ONLY takes pass codes (4 digits like "0110", "0505")
+- checkEmployeeAuthorisation ONLY takes employee IDs (4 digits like "1190", "1506")
+- If user provides employee ID, they want database access - use checkEmployeeAuthorisation
+- If user provides pass code, they want account info - use getEmployeeAccountInfo
+- NEVER call the wrong function with the wrong parameter type
+
+WORKFLOW:
+1. Database access requests → checkEmployeeAuthorisation(employeeID)
+2. Account info requests → getEmployeeAccountInfo(pass_code)
+3. If unauthorized, system sends security notification automatically`
       });
     }
     
@@ -372,13 +386,13 @@ api.post("/responses", async (req: Request, res: Response) => {
           type: "function",
           function: {
             name: "getEmployeeAccountInfo",
-            description: "Get employee account information using their pass code. MUST be called when user provides a 4-digit pass code.",
+            description: "Get employee account information using their PASS CODE. Returns employee details including their employee ID. Use this when user provides a 4-digit pass code like 0110, 0505.",
             parameters: {
               type: "object",
               properties: {
                 pass_code: {
                   type: "string",
-                  description: "Employee pass code (4 digits, may include hyphens)"
+                  description: "Employee pass code (4 digits like 0110, 0505, may include hyphens like 01-10)"
                 }
               },
               required: ["pass_code"]
@@ -389,13 +403,13 @@ api.post("/responses", async (req: Request, res: Response) => {
           type: "function",
           function: {
             name: "checkEmployeeAuthorisation",
-            description: "Check if an employee has authorization to access the database. When unauthorized, automatically sends security notification.",
+            description: "Check if an employee has authorization to access the database using their EMPLOYEE ID (NOT pass code). Returns full database access if authorized. Automatically sends security notification if unauthorized.",
             parameters: {
               type: "object",
               properties: {
                 employeeID: {
                   type: "string",
-                  description: "Employee ID (4 digits)"
+                  description: "Employee ID (4 digits like 1190, 1506) - get this from getEmployeeAccountInfo first"
                 }
               },
               required: ["employeeID"]
@@ -405,46 +419,28 @@ api.post("/responses", async (req: Request, res: Response) => {
       ];
     }
 
+    // Simplified logic: Let OpenAI decide which tool to use based on context
+    // The system message already provides clear instructions about when to use each tool
+    const userMessages = messages.filter(msg => msg.role === 'user');
+    const userInputText = JSON.stringify(userMessages).toLowerCase();
+    
     // Check if we should force tool calling
-    const inputText = JSON.stringify(messages).toLowerCase();
+    const hasPassCode = userInputText.includes('pass code') || userInputText.includes('passcode');
+    const hasEmployeeId = userInputText.includes('employee id') || userInputText.includes('employeeid');
+    const hasAuthRequest = userInputText.includes('authorization') || userInputText.includes('authorisation') || 
+                          userInputText.includes('database access') || userInputText.includes('database');
+    const hasFourDigits = /\b\d{4}\b/.test(userInputText);
     
-    // First check if it's explicitly about authorization or database access
-    const isAuthCheck = inputText.includes('authorization') || inputText.includes('authorisation') || 
-                       inputText.includes('database access') || inputText.includes('database');
+    const shouldForceTools = hasPassCode || hasEmployeeId || hasAuthRequest || hasFourDigits;
     
-    // Then check for pass codes and employee IDs
-    const hasExplicitPassCode = inputText.includes('pass code') || inputText.includes('passcode');
-    const hasExplicitEmployeeId = inputText.includes('employee id') || inputText.includes('employeeid');
-    
-    // Look for 4-digit numbers
-    const fourDigitMatches = inputText.match(/\b\d{4}\b/g) || [];
-    
-    // Determine which tool to force based on context
-    let toolChoice = null;
-    if (isAuthCheck || hasExplicitEmployeeId) {
-      // If it's about authorization or explicitly mentions employee ID, use checkEmployeeAuthorisation
-      toolChoice = {
-        type: "function",
-        function: { name: "checkEmployeeAuthorisation" }
-      };
-    } else {
-      // In all other cases (including when there's no context), use getEmployeeAccountInfo
-      toolChoice = {
-        type: "function",
-        function: { name: "getEmployeeAccountInfo" }
-      };
-    }
-    
-    const shouldForceTools = isAuthCheck || hasExplicitPassCode || hasExplicitEmployeeId || fourDigitMatches.length > 0;
-    
-    console.log(`[/api/responses] Force tools: ${shouldForceTools}, isAuthCheck: ${isAuthCheck}, hasExplicitPassCode: ${hasExplicitPassCode}, hasExplicitEmployeeId: ${hasExplicitEmployeeId}, fourDigitMatches: ${fourDigitMatches.join(',')}`);
+    console.log(`[/api/responses] Force tools: ${shouldForceTools}, hasPassCode: ${hasPassCode}, hasEmployeeId: ${hasEmployeeId}, hasAuthRequest: ${hasAuthRequest}, hasFourDigits: ${hasFourDigits}`);
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1",
       messages: messages,
       ...(formattedTools && { tools: formattedTools }),
       ...(shouldForceTools && { 
-        tool_choice: toolChoice || "required"
+        tool_choice: "required"
       }),
       ...(parallel_tool_calls !== undefined && { parallel_tool_calls }),
     });

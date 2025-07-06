@@ -71,18 +71,32 @@ export const dataBase = [
   },
 ];
 
-export const checkEmployeeAuthorisation = (employeeID: string): {Authorised: boolean; message: string} => {
+export const checkEmployeeAuthorisation = (employeeID: string): any => {
   console.log(`[checkEmployeeAuthorisation] Received employeeID: ${employeeID}`);
   const employees = Object.values(employeeAccountInfo);
   const employee = employees.find(emp => emp.employeeID === employeeID)
 
   if(employee) {
     if (employee.status === "Not compromised" && employee.lastActivities.currentConnection === "Encrypted") {
-      const result = {Authorised: true, message: "Employee is authorised."};
+      const result = {
+        Authorised: true, 
+        message: "Employee is authorised.",
+        employee: employee,
+        databaseAccess: {
+          granted: true,
+          data: dataBase,
+          allEmployees: employeeAccountInfo
+        }
+      };
       console.log(`[checkEmployeeAuthorisation] Authorised: ${JSON.stringify(result)}`);
       return result;
     } else {
-      const result = {Authorised: false, message: "Unauthorised."};
+      const result = {
+        Authorised: false, 
+        message: "Unauthorised.",
+        employee: employee,
+        reason: `Access denied: ${employee.status === "compromised" ? "Account is compromised" : "Connection is not encrypted"}`
+      };
       console.log(`[checkEmployeeAuthorisation] Unauthorised: ${JSON.stringify(result)}`);
       return result;
       }
